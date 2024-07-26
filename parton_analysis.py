@@ -121,8 +121,9 @@ def compute_helicity_basis(t: Particle, tbar: Particle):
     k_hat = boost_to_CM(t_4momentum,t_4momentum,tbar_4momentum).Vect().Unit()
     z_hat = ROOT.Math.DisplacementVector3D['ROOT::Math::Cartesian3D<double>'](0,0,1)
     cos_theta = z_hat.Dot(k_hat)
-    k_xz_proj = ROOT.Math.DisplacementVector3D['ROOT::Math::Cartesian3D<double>'](k_hat.X(),0,k_hat.Z())
-    sin_theta = np.sign(z_hat.Cross(k_xz_proj).Y())*ROOT.TMath.Sqrt(1-cos_theta*cos_theta)
+    #k_xz_proj = ROOT.Math.DisplacementVector3D['ROOT::Math::Cartesian3D<double>'](k_hat.X(),0,k_hat.Z())
+    #sin_theta = np.sign(z_hat.Cross(k_xz_proj).Y())*ROOT.TMath.Sqrt(1-cos_theta*cos_theta)
+    sin_theta = ROOT.TMath.Sqrt(1-cos_theta*cos_theta)
     r_hat = scalar_multiply(1/sin_theta, z_hat - scalar_multiply(cos_theta,k_hat))
     n_hat = r_hat.Cross(k_hat)
     return r_hat, k_hat, n_hat
@@ -149,99 +150,111 @@ def prob_hard(cos_theta_w):
 def print_3_vec(vec):
     print(vec.X(),vec.Y(),vec.Z())
 
-def compute_optimal_hadronic_direction(t: Particle, b: Particle, w: Particle, q1: Particle, q2: Particle):
+def compute_optimal_hadronic_direction(t: Particle, tbar: Particle, b: Particle, w: Particle, q1: Particle, q2: Particle):
     # linear combination of hard and soft jets in t or tbar rest frame (han p.14,37)
     t_four_momentum = t.fourMomentumRoot_PxPyPzE()
+    tbar_four_momentum = tbar.fourMomentumRoot_PxPyPzE()
     b_four_momentum = b.fourMomentumRoot_PxPyPzE()
     w_four_momentum = w.fourMomentumRoot_PxPyPzE()
     q1_four_momentum = q1.fourMomentumRoot_PxPyPzE()
     q2_four_momentum = q2.fourMomentumRoot_PxPyPzE()
 
+    t_four_momentum_CM = boost_to_CM(t_four_momentum,t_four_momentum,tbar_four_momentum)
+    tbar_four_momentum_CM = boost_to_CM(tbar_four_momentum,t_four_momentum,tbar_four_momentum)
+    b_four_momentum_CM = boost_to_CM(b_four_momentum,t_four_momentum,tbar_four_momentum)
+    w_four_momentum_CM = boost_to_CM(w_four_momentum,t_four_momentum,tbar_four_momentum)
+    q1_four_momentum_CM = boost_to_CM(q1_four_momentum,t_four_momentum,tbar_four_momentum)
+    q2_four_momentum_CM = boost_to_CM(q2_four_momentum,t_four_momentum,tbar_four_momentum)
+
+    b_four_momentum_top = boost_to_CM(b_four_momentum_CM,t_four_momentum_CM)
+    w_four_momentum_top = boost_to_CM(w_four_momentum_CM,t_four_momentum_CM)
+    q1_four_momentum_top = boost_to_CM(q1_four_momentum_CM,t_four_momentum_CM)
+    q2_four_momentum_top = boost_to_CM(q2_four_momentum_CM,t_four_momentum_CM)
+
+    b_four_momentum_w = boost_to_CM(b_four_momentum_top,w_four_momentum_top)
+    q1_four_momentum_w = boost_to_CM(q1_four_momentum_top,w_four_momentum_top)
+    q2_four_momentum_w = boost_to_CM(q2_four_momentum_top,w_four_momentum_top)
+
     # compute helicity angle, angle between down type quark and W in w rest frame
     if abs(q1.PDGcode) % 2:
         q_down = q1
-        q_down_four_momentum = q1_four_momentum
+        q_down_four_momentum_w = q1_four_momentum_w
+        q_down_four_momentum_top = q1_four_momentum_top
         q_up = q2
-        q_up_four_momentum = q2_four_momentum
+        q_up_four_momentum_w = q2_four_momentum_w
+        q_up_four_momentum_top = q2_four_momentum_top
     else:
         q_down = q2
-        q_down_four_momentum = q2_four_momentum
+        q_down_four_momentum_w = q2_four_momentum_w
+        q_down_four_momentum_top = q2_four_momentum_top
         q_up = q1
-        q_up_four_momentum = q1_four_momentum
+        q_up_four_momentum_w = q1_four_momentum_w
+        q_up_four_momentum_top = q1_four_momentum_top
     # this should be doable without the b quark, check boosts
-    b_four_w = boost_to_CM(b_four_momentum,w_four_momentum)
-    w_dir = -b_four_w.Vect().Unit()
-    q_down_dir_w_rest = boost_to_CM(q_down_four_momentum,w_four_momentum).Vect().Unit()
-    cos_theta_w = w_dir.Dot(q_down_dir_w_rest)
-
-    #print_3_vec(w_dir)
-    #w_top = boost_to_CM(w_four_momentum,t_four_momentum)
-    #print_3_vec(w_top.Vect().Unit())
+    #w_dir1 = w_four_momentum_top.Vect().Unit()
+    w_dir2 = -b_four_momentum_w.Vect().Unit()
+    #print_3_vec(w_dir1)
+    #print_3_vec(w_dir2)
+    q_down_dir = q_down_four_momentum_w.Vect().Unit()
+    cos_theta_w = w_dir2.Dot(q_down_dir)
 
     # forward emitted quark in W rest frame is the harder quark (https://arxiv.org/pdf/1401.3021 p.6)
     if cos_theta_w > 0:
         q_hard = q_down
-        q_hard_four_momentum = q_down_four_momentum
+        q_hard_four_momentum_top = q_down_four_momentum_top
         q_soft = q_up
-        q_soft_four_momentum = q_up_four_momentum
+        q_soft_four_momentum_top = q2_four_momentum_top
     else:
         q_hard = q_up
-        q_hard_four_momentum = q_up_four_momentum
+        q_hard_four_momentum_top = q2_four_momentum_top
         q_soft = q_down
-        q_soft_four_momentum = q_down_four_momentum
+        q_soft_four_momentum_top = q_down_four_momentum_top
 
     # boost hard and soft quarks to top rest frame
-    q_soft_four_t = boost_to_CM(q_soft_four_momentum,t_four_momentum)
-    q_hard_four_t = boost_to_CM(q_hard_four_momentum,t_four_momentum)
-    assert(q_soft_four_t.E() < q_hard_four_t.E())
-    q_soft_dir = q_soft_four_t.Vect().Unit()
-    q_hard_dir = q_hard_four_t.Vect().Unit()
+    assert(q_soft_four_momentum_top.E() <= q_hard_four_momentum_top.E())
+    q_soft_dir = q_soft_four_momentum_top.Vect().Unit()
+    q_hard_dir = q_hard_four_momentum_top.Vect().Unit()
     opt_momentum = scalar_multiply(prob_soft(cos_theta_w),q_soft_dir) + scalar_multiply(prob_hard(cos_theta_w),q_hard_dir)
     return opt_momentum
 
-def compute_Omega(p_rest: Particle, e: Event):
+def compute_Omega(t_parent: Particle, t_other: Particle, e: Event):
     # unit vector along decay product's momentum in parent's rest frame (han p.9,16)
-    if decays_leptonically(p_rest,e):
-        if p_rest.PDGcode > 0:
+    if decays_leptonically(t_parent,e):
+        if t_parent.PDGcode > 0:
             l = e.lp
         else:
             l = e.lm
-        decay_axis = boost_to_CM(l.fourMomentumRoot_PxPyPzE(),p_rest.fourMomentumRoot_PxPyPzE()).Vect().Unit()
+        t_four_momentum = t_parent.fourMomentumRoot_PxPyPzE()
+        tbar_four_momentum = t_other.fourMomentumRoot_PxPyPzE()
+        l_four_momentum = l.fourMomentumRoot_PxPyPzE()
+
+        t_four_momentum_CM = boost_to_CM(t_four_momentum,t_four_momentum,tbar_four_momentum)
+        l_four_momentum_CM = boost_to_CM(l_four_momentum,t_four_momentum,tbar_four_momentum)
+
+        l_four_momentum_top = boost_to_CM(l_four_momentum_CM,t_four_momentum_CM)
+
+        decay_axis = l_four_momentum_top.Vect().Unit()
     else:
-        if p_rest.PDGcode > 0:
+        if t_parent.PDGcode > 0:
             w = e.wp
         else:
             w = e.wm
         q1,q2 = get_hadrons(w,e.particles)
-        for i in p_rest.children:
+        for i in t_parent.children:
             if abs(e.particles[i].PDGcode) < 10:
                 b = e.particles[i]
-        decay_axis = compute_optimal_hadronic_direction(p_rest,b,w,q1,q2).Unit()
+        decay_axis = compute_optimal_hadronic_direction(t_parent,t_other,b,w,q1,q2).Unit()
     return decay_axis
 
-def compute_p_opt(p_rest: Particle, e: Event):
-    # unit vector along decay product's momentum in parent's rest frame (han p.9,16)
-    if p_rest.PDGcode > 0:
-        w = e.wp
-    else:
-        w = e.wm
-    q1,q2 = get_hadrons(w,e.particles)
-    for i in p_rest.children:
-        if abs(e.particles[i].PDGcode) < 10:
-            b = e.particles[i]
-    p_opt = compute_optimal_hadronic_direction(p_rest,b,w,q1,q2)
-    return p_opt
-
-
-def compute_cos_theta_axis(parent: Particle, e: Event, axis):
+def compute_cos_theta_axis(t_parent: Particle, t_other: Particle, e: Event, axis):
     # cos of angle between decay product and an axis in parent's restframe (han p.9)
-    omega = compute_Omega(parent,e)
+    omega = compute_Omega(t_parent,t_other,e)
     return omega.Dot(axis)
 
 def compute_cos_theta_ttbar(t: Particle, tbar: Particle, e: Event):
     # cos of angle between t decay product and tbar in their respective rest frames (han p.16)
-    t_Omega = compute_Omega(t,e)
-    tbar_Omega = compute_Omega(tbar,e)
+    t_Omega = compute_Omega(t,tbar,e)
+    tbar_Omega = compute_Omega(tbar,t,e)
     return t_Omega.Dot(tbar_Omega)
 
 def compute_asymmetry(x,x_min,x_max):
@@ -402,20 +415,15 @@ if __name__ == "__main__":
     N_events = 10
     cos_theta_t_n = np.zeros(N_events)
     cos_theta_tbar_n = np.zeros(N_events)
-    p_opts = np.zeros(N_events)
     for i,e in enumerate(itertools.islice(events,0,N_events)):
         t = e.t
         tbar = e.tbar
         r_hat, k_hat, n_hat = compute_helicity_basis(t,tbar)
-        #cos_theta_t_n[i] = compute_cos_theta_axis(t,e,n_hat)
-        #cos_theta_tbar_n[i] = compute_cos_theta_axis(tbar,e,n_hat)
-        if e.is_t_leptonic:
-            p_opt = compute_p_opt(tbar,e)
-        else:
-            p_opt = compute_p_opt(t,e)
-        print(p_opt.R())
-        p_opts[i]=p_opt.R()
-    
+        #cos_theta_t_n[i] = compute_cos_theta_axis(t,tbar,e,n_hat)
+        #cos_theta_tbar_n[i] = compute_cos_theta_axis(tbar,t,e,n_hat)
+        for p in e.particles:
+            print(p.type(),p.fourMomentum())
+        
     #run_analysis(f_name)
     #meta_data = get_simulation_meta_data(f_name)
     #events_batch = get_awk_events_from_lhe_batched(f_name,10)
