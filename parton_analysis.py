@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # scikit hep headers
-#import awkward as ak
+import awkward as ak
 import vector
 import uproot
 import pylhe
@@ -116,8 +116,8 @@ def compute_Omega_hadronic(t_lep_4momentum, t_had_4momentum, w_4momentum, qd_4mo
 
 def compute_asymmetry(x,weights):
     # asymmetry of a distribution (han p.10)
-    Np = weights[x >= 0].sum()
-    Nm = weights[x < 0].sum()
+    Np = ak.sum(weights[x >= 0])
+    Nm = ak.sum(weights[x < 0])
     return (Np-Nm)/(Np+Nm)
 
 def compute_Cij(cos_i_cos_j,weights):
@@ -131,54 +131,12 @@ def compute_Cij(cos_i_cos_j,weights):
 #####################
 # parsing functions #
 #####################
-def get_lhe_tags(f_name: str) -> set[str]:
-    tags = set()
-    with gzip.open(f_name, 'rb') as f:
-        for event,element in ET.iterparse(f):
-            if 'event' in tags:
-                # are there tags after the events?
-                break
-            tags.add(element.tag)
-    return tags
-
-def get_lhe_meta_data(f_name: str):
-    keys = ["beam1_PID",
-            "beam2_PID",
-            "beam1_energy_GeV",
-            "beam1_energy_GeV",
-            "PDF_author_group1",
-            "PDF_author_group2",
-            "PDFset1",
-            "PDFset2",
-            "weightingStrategy",
-            "numProcesses",
-            "sigma_pb",
-            "sigma_error_pb",
-            "max_weight",
-            "tag"]
-    with gzip.open(f_name, 'rb') as f:
-        for event,element in ET.iterparse(f):
-            if element.tag == 'MGGenerationInfo':
-                event_info = element.text.split()
-                N_events = int(event_info[5])
-                cross_section = float(event_info[-1])
-            elif element.tag == 'init':
-                vals = element.text.split()
-                meta_data = {pair[0]: (int(pair[1]) if pair[1].find('.') < 0 else float(pair[1])) for pair in zip(keys,vals)}
-                break
-        meta_data['integrated_weight_pb'] = cross_section
-        meta_data['numEvents'] = N_events
-        return meta_data
-            
-
-def get_lhe_events_gzip(f_name: str, resolved=False):
-    with gzip.open(f_name, 'rb') as f:
-        for event,element in ET.iterparse(f):
-            if element.tag == 'event':
-                evnt_raw = element.text.split()
-                evnt_data = evnt_raw[:6]
-                particle_data = evnt_raw[6:]
-                yield evnt_data, particle_data
+def pylhe_test():
+    f_name = "ttbar-parton-madspin-low.lhe.gz"
+    #print(pylhe.read_lhe_init(f_name))
+    events_gen = pylhe.read_lhe_with_attributes(f_name)
+    events = pylhe.to_awkward(events_gen)
+    print(events.layout)
 
 ###########
 # drivers #
@@ -188,6 +146,8 @@ if __name__ == "__main__":
     #f_name2 = 'ttbar-parton-madspin-negative.lhe.gz'
     #run_analysis_split(f_name,f_name2)
     #f_name = 'ttbar-parton-madspin-low.lhe.gz'
+    pylhe_test()
+    assert(1==2)
 
     #df_ = uproot.concatenate(Path("/mnt/e/Root-Data/inclusive.root"), library="pd")
     f_name = '/mnt/e/Root-Data/events.inclusive.parton.root'
@@ -197,7 +157,7 @@ if __name__ == "__main__":
     p_branch = t['Particle']
     print(e_branch.keys())
     print(p_branch.keys())
-    weights = e_branch["Event.Weight"].array(library='np')
+    weights = e_branch["Event.Weight"].array()[:,0]
     # outer batch loop over vectorized functions
     idx = 0
     
@@ -339,7 +299,6 @@ if __name__ == "__main__":
         ckk_threshold.append(ckk_tmp[threshold_filter])
 
         weights_threshold.append(weights[batch_size*idx:(idx+1)*batch_size][threshold_filter])
-
         
         # apply resolved preselction
         #leps_and_jets_filter = (ps['Particle.Status'] == 1) & ( (np.abs(ps['Particle.PID']) < 10) | ((np.abs(ps['Particle.PID']) > 10) & (np.abs(ps['Particle.PID']) < 17) & (ps['Particle.PID'] % 2 == 1)) )
@@ -392,8 +351,6 @@ if __name__ == "__main__":
     ckk_threshold = np.concatenate(ckk_threshold)
 
     weights_threshold = np.concatenate(weights_threshold)
-
-
     print(compute_Cij(cnn_threshold,weights_threshold), compute_Cij(crn_threshold,weights_threshold), compute_Cij(ckn_threshold,weights_threshold))
 
     print(compute_Cij(cnr_threshold,weights_threshold), compute_Cij(crr_threshold,weights_threshold), compute_Cij(ckr_threshold,weights_threshold))
