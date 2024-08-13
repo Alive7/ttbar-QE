@@ -1,11 +1,5 @@
-# python headers
-import xml.etree.ElementTree as ET
-#from math import isclose
-#import itertools
-import gzip
-
 # python scientific headers
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import numpy as np
 
 # scikit hep headers
@@ -100,7 +94,7 @@ def compute_Omega_hadronic(t_lep_4momentum, t_had_4momentum, w_4momentum, qd_4mo
     
     # forward emitted quark in W rest frame is the harder quark (https://arxiv.org/pdf/1401.3021 p.6)
     q_hard_four_momentum_top = vector.MomentumNumpy4D(np.where(cos_theta_w >= 0,qd_four_momentum_top,qu_four_momentum_top))
-    q_soft_four_momentum_top = vector.MomentumNumpy4D(np.where(cos_theta_w < 0,qu_four_momentum_top,qd_four_momentum_top))
+    q_soft_four_momentum_top = vector.MomentumNumpy4D(np.where(cos_theta_w >= 0,qu_four_momentum_top,qd_four_momentum_top))
     assert(np.all(q_soft_four_momentum_top.E <= q_hard_four_momentum_top.E))
     q_soft_dir = q_soft_four_momentum_top.to_Vector3D().unit()
     q_hard_dir = q_hard_four_momentum_top.to_Vector3D().unit()
@@ -112,7 +106,7 @@ def compute_Omega_hadronic(t_lep_4momentum, t_had_4momentum, w_4momentum, qd_4mo
 
     # form optimal hadronic direction
     opt_had_momentum = prob_soft(fp,fm)*q_soft_dir + prob_hard(fp,fm)*q_hard_dir
-    return cos_theta_w, opt_had_momentum.to_Vector3D().unit()
+    return cos_theta_w, opt_had_momentum.unit()
 
 def compute_asymmetry(x,weights):
     # asymmetry of a distribution (han p.10)
@@ -124,39 +118,44 @@ def compute_Cij(cos_i_cos_j,weights):
     # compute spin corelation matrix element with respect to ij axes
     # method 2 of han p.10
     kappa_A = 1
-    kappa_B = .64
+    kappa_B = .64 #1
     asymmetry = compute_asymmetry(cos_i_cos_j,weights)
     return -4*asymmetry/(kappa_A*kappa_B)
 
 #####################
 # parsing functions #
 #####################
-def pylhe_test():
-    f_name = "ttbar-parton-madspin-low.lhe.gz"
-    #print(pylhe.read_lhe_init(f_name))
-    events_gen = pylhe.read_lhe_with_attributes(f_name)
-    events = pylhe.to_awkward(events_gen)
-    print(events.layout)
+def process_lhe(f_name: str):
+    init = pylhe.read_lhe_init(f_name)
+    print(init.keys())
+    print(init['initInfo'])
+    print(init['procInfo'])
+    events = pylhe.to_awkward(pylhe.read_lhe_with_attributes(f_name))
+    #print(events.fields)
+    return events.eventinfo, events.particles
+
+def process_root(f_name: str):
+    with uproot.open(f_name_root) as f:
+        t = f['LHEF']
+    e_branch = t['Event']
+    p_branch = t['Particle']
+    #print(t.keys())
+    print(e_branch.keys())
+    print(p_branch.keys())
+    return e_branch, p_branch
 
 ###########
 # drivers #
 ###########
 if __name__ == "__main__":
-    #f_name = 'ttbar-parton-madspin-positive.lhe.gz'
-    #f_name2 = 'ttbar-parton-madspin-negative.lhe.gz'
-    #run_analysis_split(f_name,f_name2)
-    #f_name = 'ttbar-parton-madspin-low.lhe.gz'
-    pylhe_test()
-    assert(1==2)
-
-    #df_ = uproot.concatenate(Path("/mnt/e/Root-Data/inclusive.root"), library="pd")
-    f_name = '/mnt/e/Root-Data/events.inclusive.parton.root'
-    with uproot.open(f_name) as f:
-        t = f['LHEF']
-    e_branch = t['Event']
-    p_branch = t['Particle']
-    print(e_branch.keys())
-    print(p_branch.keys())
+    #f_name_lhe = 'ttbar-parton-madspin-low.lhe.gz'
+    f_name_root = '/mnt/e/Root-Data/events.inclusive.parton.root'
+    #event_info, particles = process_lhe(f_name_lhe)
+    #print(particles.fields)
+    #print(event_info.fields)
+    #print(event_info.nparticles, event_info.weight)
+    e_branch, p_branch = process_root(f_name_root)
+    #print(type(particles), type(p_branch))
     weights = e_branch["Event.Weight"].array()[:,0]
     # outer batch loop over vectorized functions
     idx = 0
@@ -187,20 +186,6 @@ if __name__ == "__main__":
     ckk_threshold = []
 
     weights_threshold = []
-
-
-    cnn_resolved = []
-    cnr_resolved = []
-    cnk_resolved = []
-
-    crn_resolved = []
-    crr_resolved = []
-    crk_resolved = []
-
-    ckn_resolved = []
-    ckr_resolved = []
-    ckk_resolved = []
-
 
     batch_size = 60000
     # entry_start=1980000/2-batch_size/2,entry_stop=1980000/2+batch_size/2,step_size=batch_size
@@ -238,12 +223,13 @@ if __name__ == "__main__":
         # copmute helicity basis and omegas
         abs_cos_theta, r_hat, k_hat, n_hat = compute_helicity_basis(t_4momentum,tbar_4momentum)
         omega_leptonic = compute_Omega_leptonic(t_lep_4momentum,t_had_4momentum,l_4momentum)
+        omega_hadronic_ideal = compute_Omega_leptonic(t_had_4momentum, t_lep_4momentum, qd_4momentum)
         cos_theta_w, omega_hadronic = compute_Omega_hadronic(t_lep_4momentum,t_had_4momentum,w_had_4momentum,qd_4momentum,qu_4momentum)
 
         # separate leptonic/hadronic omegas into t/tbar
         event_filter_t_leptonic = ls['Particle.PID'] < 0
         omega_t = vector.VectorNumpy3D(np.where(event_filter_t_leptonic, omega_leptonic, omega_hadronic))
-        omega_tbar = vector.VectorNumpy3D(np.where(~event_filter_t_leptonic, omega_leptonic, omega_hadronic))
+        omega_tbar = vector.VectorNumpy3D(np.where(event_filter_t_leptonic, omega_hadronic, omega_leptonic))
 
         # dot with unit vectors
         cos_t_n = omega_t.dot(n_hat)
@@ -285,7 +271,7 @@ if __name__ == "__main__":
         mtt = ttbar_4momentum.M
         abs_beta_tt = np.abs(ttbar_4momentum.beta)
         threshold_filter = ((mtt <= 400) | ((mtt <= 500) & (mtt > 400) & (abs_cos_theta >= np.cos(3*np.pi/20))) | ((mtt <= 600) & (mtt > 500) & (abs_cos_theta >= np.cos(np.pi/20)))) & (abs_beta_tt <= .9)
-
+        
         cnn_threshold.append(cnn_tmp[threshold_filter])
         cnr_threshold.append(cnr_tmp[threshold_filter])
         cnk_threshold.append(cnk_tmp[threshold_filter])
@@ -331,11 +317,11 @@ if __name__ == "__main__":
         idx+=1
 
     # compute matrix elements
-    print(compute_Cij(cnn,weights), compute_Cij(crn,weights), compute_Cij(cnk,weights))
+    #print(compute_Cij(cnn,weights), compute_Cij(crn,weights), compute_Cij(cnk,weights))
 
-    print(compute_Cij(cnr,weights), compute_Cij(crr,weights), compute_Cij(crk,weights))
+    #print(compute_Cij(cnr,weights), compute_Cij(crr,weights), compute_Cij(crk,weights))
 
-    print(compute_Cij(cnk,weights), compute_Cij(crk,weights), compute_Cij(ckk,weights))
+    #print(compute_Cij(cnk,weights), compute_Cij(crk,weights), compute_Cij(ckk,weights))
 
     # threshold analysis
     cnn_threshold = np.concatenate(cnn_threshold)
@@ -351,6 +337,7 @@ if __name__ == "__main__":
     ckk_threshold = np.concatenate(ckk_threshold)
 
     weights_threshold = np.concatenate(weights_threshold)
+    print(cnn.shape, cnn_threshold.shape, 100*(cnn_threshold.shape[0]/cnn.shape[0]))
     print(compute_Cij(cnn_threshold,weights_threshold), compute_Cij(crn_threshold,weights_threshold), compute_Cij(ckn_threshold,weights_threshold))
 
     print(compute_Cij(cnr_threshold,weights_threshold), compute_Cij(crr_threshold,weights_threshold), compute_Cij(ckr_threshold,weights_threshold))
@@ -373,35 +360,3 @@ if __name__ == "__main__":
     #c1.Print("ctnn_plot.pdf")
     #h1.Fit("cross","S")
     #c1.Print("ctnn_plot_fit.pdf")
-
-
-    # resolved ananlysis
-    #cnn_resolved = np.concatenate(cnn_resolved)
-    #cnr_resolved = np.concatenate(cnr_resolved)
-    #cnk_resolved = np.concatenate(cnk_resolved)
-
-    #crn_resolved = np.concatenate(crn_resolved)
-    #crr_resolved = np.concatenate(crr_resolved)
-    #crk_resolved = np.concatenate(crk_resolved)
-
-    #ckn_resolved = np.concatenate(ckn_resolved)
-    #ckr_resolved = np.concatenate(ckr_resolved)
-    #ckk_resolved = np.concatenate(ckk_resolved)
-
-    #print(compute_Cij(cnn_resolved,'cnn-resolved'))
-    #print(compute_Cij(cnr_resolved,'cnr-resolved'))
-    #print(compute_Cij(cnk_resolved,'cnk-resolved'))
-
-    #print(compute_Cij(crn_resolved,'crn-resolved'))
-    #print(compute_Cij(crr_resolved,'crr-resolved'))
-    #print(compute_Cij(crk_resolved,'crk-resolved'))
-
-    #print(compute_Cij(ckn_resolved,'ckn-resolved'))
-    #print(compute_Cij(ckr_resolved,'ckr-resolved'))
-    #print(compute_Cij(ckk_resolved,'ckk-resolved'))
-
-
-    #events = [event_tree[k].array() for k in event_tree.keys()]
-    #particles = [particle_tree[k].array() for k in particle_tree.keys()]
-    #print(events)
-    #print(particles)
