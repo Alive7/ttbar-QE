@@ -42,7 +42,7 @@ def compute_helicity_basis(t_4momentum, tbar_4momentum):
     sin_theta = np.sqrt(1-cos_theta*cos_theta)
     r_hat = (z_hat - cos_theta*k_hat)/sin_theta
     n_hat = r_hat.cross(k_hat)
-    return np.abs(cos_theta), r_hat, k_hat, n_hat
+    return np.abs(cos_theta), [n_hat, r_hat, k_hat]
 
 def compute_Omega_leptonic(t_lep_4momentum, t_had_4momentum, l_4momentum):
     # unit vector along leptonic decay product momentum in parent's rest frame (han p.9,16)
@@ -110,15 +110,16 @@ def compute_Omega_hadronic(t_lep_4momentum, t_had_4momentum, w_4momentum, qd_4mo
 
 def compute_asymmetry(x,weights):
     # asymmetry of a distribution (han p.10)
-    Np = ak.sum(weights[x >= 0])
-    Nm = ak.sum(weights[x < 0])
+    Np = np.sum(weights[x >= 0])
+    Nm = np.sum(weights[x < 0])
+    #print(x[x >= 0].shape[0], x[x < 0].shape[0])
     return (Np-Nm)/(Np+Nm)
 
 def compute_Cij(cos_i_cos_j,weights):
     # compute spin corelation matrix element with respect to ij axes
     # method 2 of han p.10
     kappa_A = 1
-    kappa_B = .64 #1
+    kappa_B = .64#1
     asymmetry = compute_asymmetry(cos_i_cos_j,weights)
     return -4*asymmetry/(kappa_A*kappa_B)
 
@@ -139,7 +140,6 @@ def process_root(f_name: str):
         t = f['LHEF']
     e_branch = t['Event']
     p_branch = t['Particle']
-    #print(t.keys())
     print(e_branch.keys())
     print(p_branch.keys())
     return e_branch, p_branch
@@ -155,36 +155,14 @@ if __name__ == "__main__":
     #print(event_info.fields)
     #print(event_info.nparticles, event_info.weight)
     e_branch, p_branch = process_root(f_name_root)
+    N_events = e_branch.num_entries
     #print(type(particles), type(p_branch))
     weights = e_branch["Event.Weight"].array()[:,0]
     # outer batch loop over vectorized functions
     idx = 0
     
-    cnn = np.empty(1980000)
-    cnr = np.empty(1980000)
-    cnk = np.empty(1980000)
-
-    crn = np.empty(1980000)
-    crr = np.empty(1980000)
-    crk = np.empty(1980000)
-
-    ckn = np.empty(1980000)
-    ckr = np.empty(1980000)
-    ckk = np.empty(1980000)
-
- 
-    cnn_threshold = []
-    cnr_threshold = []
-    cnk_threshold = []
-
-    crn_threshold = []
-    crr_threshold = []
-    crk_threshold = []
-
-    ckn_threshold = []
-    ckr_threshold = []
-    ckk_threshold = []
-
+    cos_ij = np.empty((3,3,N_events))
+    cos_ij_threshold = []
     weights_threshold = []
 
     batch_size = 60000
@@ -221,9 +199,9 @@ if __name__ == "__main__":
         qu_4momentum = vector.array({'px':qus['Particle.Px'],'py':qus['Particle.Py'],'pz':qus['Particle.Pz'],'E':qus['Particle.E']})
         
         # copmute helicity basis and omegas
-        abs_cos_theta, r_hat, k_hat, n_hat = compute_helicity_basis(t_4momentum,tbar_4momentum)
+        abs_cos_theta, nrk_bais = compute_helicity_basis(t_4momentum,tbar_4momentum)
         omega_leptonic = compute_Omega_leptonic(t_lep_4momentum,t_had_4momentum,l_4momentum)
-        omega_hadronic_ideal = compute_Omega_leptonic(t_had_4momentum, t_lep_4momentum, qd_4momentum)
+        #omega_hadronic_ideal = compute_Omega_leptonic(t_had_4momentum, t_lep_4momentum, qd_4momentum)
         cos_theta_w, omega_hadronic = compute_Omega_hadronic(t_lep_4momentum,t_had_4momentum,w_had_4momentum,qd_4momentum,qu_4momentum)
 
         # separate leptonic/hadronic omegas into t/tbar
@@ -232,57 +210,20 @@ if __name__ == "__main__":
         omega_tbar = vector.VectorNumpy3D(np.where(event_filter_t_leptonic, omega_hadronic, omega_leptonic))
 
         # dot with unit vectors
-        cos_t_n = omega_t.dot(n_hat)
-        cos_t_r = omega_t.dot(r_hat)
-        cos_t_k = omega_t.dot(k_hat)
-
-        cos_tbar_n = omega_tbar.dot(n_hat)
-        cos_tbar_r = omega_tbar.dot(r_hat)
-        cos_tbar_k = omega_tbar.dot(k_hat)
-
-        cnn_tmp = cos_t_n*cos_tbar_n
-        cnr_tmp = cos_t_n*cos_tbar_r
-        cnk_tmp = cos_t_n*cos_tbar_k
-
-        crn_tmp = cos_t_r*cos_tbar_n
-        crr_tmp = cos_t_r*cos_tbar_r
-        crk_tmp = cos_t_r*cos_tbar_k
-
-        ckn_tmp = cos_t_k*cos_tbar_n
-        ckr_tmp = cos_t_k*cos_tbar_r
-        ckk_tmp = cos_t_k*cos_tbar_k
-
-
+        cos_t_nrk = np.array([omega_t.dot(vec) for vec in nrk_bais])
+        cos_tbar_nrk = np.array([omega_tbar.dot(vec) for vec in nrk_bais])
+        
         # generate matrix of cosines
-        cnn[batch_size*idx:(idx+1)*batch_size] = cnn_tmp
-        cnr[batch_size*idx:(idx+1)*batch_size] = cnr_tmp
-        cnk[batch_size*idx:(idx+1)*batch_size] = cnk_tmp
-
-        crn[batch_size*idx:(idx+1)*batch_size] = crn_tmp
-        crk[batch_size*idx:(idx+1)*batch_size] = crr_tmp
-        crn[batch_size*idx:(idx+1)*batch_size] = crk_tmp
-
-        ckn[batch_size*idx:(idx+1)*batch_size] = ckn_tmp
-        ckr[batch_size*idx:(idx+1)*batch_size] = ckr_tmp
-        ckk[batch_size*idx:(idx+1)*batch_size] = ckk_tmp
-
+        cos_ij_tmp = np.einsum('ik,jk->ijk',cos_t_nrk,cos_tbar_nrk)
+        cos_ij[:,:,batch_size*idx:(idx+1)*batch_size] = cos_ij_tmp
+        
         # apply threshold selection
         ttbar_4momentum = t_4momentum + tbar_4momentum
         mtt = ttbar_4momentum.M
         abs_beta_tt = np.abs(ttbar_4momentum.beta)
         threshold_filter = ((mtt <= 400) | ((mtt <= 500) & (mtt > 400) & (abs_cos_theta >= np.cos(3*np.pi/20))) | ((mtt <= 600) & (mtt > 500) & (abs_cos_theta >= np.cos(np.pi/20)))) & (abs_beta_tt <= .9)
         
-        cnn_threshold.append(cnn_tmp[threshold_filter])
-        cnr_threshold.append(cnr_tmp[threshold_filter])
-        cnk_threshold.append(cnk_tmp[threshold_filter])
-
-        crn_threshold.append(crn_tmp[threshold_filter])
-        crr_threshold.append(crr_tmp[threshold_filter])
-        crk_threshold.append(crk_tmp[threshold_filter])
-
-        ckn_threshold.append(ckn_tmp[threshold_filter])
-        ckr_threshold.append(ckr_tmp[threshold_filter])
-        ckk_threshold.append(ckk_tmp[threshold_filter])
+        cos_ij_threshold.append(cos_ij_tmp[:,:,threshold_filter])
 
         weights_threshold.append(weights[batch_size*idx:(idx+1)*batch_size][threshold_filter])
         
@@ -301,49 +242,15 @@ if __name__ == "__main__":
 
         #preselection_filter = np.all(leps_and_jets_4momentum.pt.reshape((batch_size,5)) > 25,axis=1) & (nuts_4momentum.Et > 30) & (np.all(np.abs(leps_and_jets_4momentum.eta.reshape((batch_size,5))) < 2.5,axis=1))
 
-        #cnn_resolved.append(cnn_tmp[preselection_filter])
-        #cnr_resolved.append(cnr_tmp[preselection_filter])
-        #cnk_resolved.append(cnk_tmp[preselection_filter])
-
-        #crn_resolved.append(crn_tmp[preselection_filter])
-        #crr_resolved.append(crr_tmp[preselection_filter])
-        #crk_resolved.append(crk_tmp[preselection_filter])
-
-        #ckn_resolved.append(ckn_tmp[preselection_filter])
-        #ckr_resolved.append(ckr_tmp[preselection_filter])
-        #ckk_resolved.append(ckk_tmp[preselection_filter])
-
         print(idx)
         idx+=1
 
-    # compute matrix elements
-    #print(compute_Cij(cnn,weights), compute_Cij(crn,weights), compute_Cij(cnk,weights))
-
-    #print(compute_Cij(cnr,weights), compute_Cij(crr,weights), compute_Cij(crk,weights))
-
-    #print(compute_Cij(cnk,weights), compute_Cij(crk,weights), compute_Cij(ckk,weights))
-
     # threshold analysis
-    cnn_threshold = np.concatenate(cnn_threshold)
-    cnr_threshold = np.concatenate(cnr_threshold)
-    cnk_threshold = np.concatenate(cnk_threshold)
-
-    crn_threshold = np.concatenate(crn_threshold)
-    crr_threshold = np.concatenate(crr_threshold)
-    crk_threshold = np.concatenate(crk_threshold)
-
-    ckn_threshold = np.concatenate(ckn_threshold)
-    ckr_threshold = np.concatenate(ckr_threshold)
-    ckk_threshold = np.concatenate(ckk_threshold)
-
-    weights_threshold = np.concatenate(weights_threshold)
-    print(cnn.shape, cnn_threshold.shape, 100*(cnn_threshold.shape[0]/cnn.shape[0]))
-    print(compute_Cij(cnn_threshold,weights_threshold), compute_Cij(crn_threshold,weights_threshold), compute_Cij(ckn_threshold,weights_threshold))
-
-    print(compute_Cij(cnr_threshold,weights_threshold), compute_Cij(crr_threshold,weights_threshold), compute_Cij(ckr_threshold,weights_threshold))
-
-    print(compute_Cij(cnk_threshold,weights_threshold), compute_Cij(crk_threshold,weights_threshold), compute_Cij(ckk_threshold,weights_threshold))
-
+    cos_ij_threshold = np.concatenate(cos_ij_threshold,axis=2)
+    weights_threshold = ak.concatenate(weights_threshold).to_numpy()
+    Cij = np.apply_along_axis(compute_Cij,-1,cos_ij_threshold,weights_threshold)
+    print(Cij)
+    
     # cnn fitting
     #cross = ROOT.TF1("cross", differential_cross_section_func, -1,1,1)
     #cross.SetParameters(0)
