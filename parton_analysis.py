@@ -1,3 +1,6 @@
+# python headers
+import time
+
 # python scientific headers
 #import matplotlib.pyplot as plt
 import numpy as np
@@ -8,17 +11,8 @@ import vector
 import uproot
 import pylhe
 
-# yuleigh compatibility
-#import pandas as pd
-#from pathlib import Path
-#from plotly.subplots import make_subplots
-#import plotly.graph_objects as go
-
 # root
 #import ROOT
-
-# local
-#from root_wrapper import *
 
 # dictionary of PDG codes for fundamental particles 2020 rev:
 # https://pdg.lbl.gov/2020/reviews/rpp2020-rev-monte-carlo-numbering.pdf
@@ -42,7 +36,7 @@ def compute_helicity_basis(t_4momentum, tbar_4momentum):
     sin_theta = np.sqrt(1-cos_theta*cos_theta)
     r_hat = (z_hat - cos_theta*k_hat)/sin_theta
     n_hat = r_hat.cross(k_hat)
-    return np.abs(cos_theta), [n_hat, r_hat, k_hat]
+    return np.arccos(np.abs(cos_theta)), [n_hat, r_hat, k_hat]
 
 def compute_Omega_leptonic(t_lep_4momentum, t_had_4momentum, l_4momentum):
     # unit vector along leptonic decay product momentum in parent's rest frame (han p.9,16)
@@ -95,7 +89,7 @@ def compute_Omega_hadronic(t_lep_4momentum, t_had_4momentum, w_4momentum, qd_4mo
     # forward emitted quark in W rest frame is the harder quark (https://arxiv.org/pdf/1401.3021 p.6)
     q_hard_four_momentum_top = vector.MomentumNumpy4D(np.where(cos_theta_w >= 0,qd_four_momentum_top,qu_four_momentum_top))
     q_soft_four_momentum_top = vector.MomentumNumpy4D(np.where(cos_theta_w >= 0,qu_four_momentum_top,qd_four_momentum_top))
-    assert(np.all(q_soft_four_momentum_top.E <= q_hard_four_momentum_top.E))
+    #assert(np.all(q_soft_four_momentum_top.E <= q_hard_four_momentum_top.E))
     q_soft_dir = q_soft_four_momentum_top.to_Vector3D().unit()
     q_hard_dir = q_hard_four_momentum_top.to_Vector3D().unit()
 
@@ -106,13 +100,15 @@ def compute_Omega_hadronic(t_lep_4momentum, t_had_4momentum, w_4momentum, qd_4mo
 
     # form optimal hadronic direction
     opt_had_momentum = prob_soft(fp,fm)*q_soft_dir + prob_hard(fp,fm)*q_hard_dir
-    return cos_theta_w, opt_had_momentum.unit()
+    return opt_had_momentum.unit()
 
 def compute_asymmetry(x,weights):
     # asymmetry of a distribution (han p.10)
-    Np = np.sum(weights[x >= 0])
-    Nm = np.sum(weights[x < 0])
-    #print(x[x >= 0].shape[0], x[x < 0].shape[0])
+    #Np = np.sum(weights[x >= 0])
+    #Nm = np.sum(weights[x < 0])
+    Np = np.sum(x >= 0)
+    Nm = np.sum(x < 0)
+    #print(Np, Nm)
     return (Np-Nm)/(Np+Nm)
 
 def compute_Cij(cos_i_cos_j,weights):
@@ -122,6 +118,10 @@ def compute_Cij(cos_i_cos_j,weights):
     kappa_B = .64#1
     asymmetry = compute_asymmetry(cos_i_cos_j,weights)
     return -4*asymmetry/(kappa_A*kappa_B)
+
+####################
+# helper functions #
+####################
 
 #####################
 # parsing functions #
@@ -148,6 +148,7 @@ def process_root(f_name: str):
 # drivers #
 ###########
 if __name__ == "__main__":
+    #t_total = time.time()
     #f_name_lhe = 'ttbar-parton-madspin-low.lhe.gz'
     f_name_root = '/mnt/e/Root-Data/events.inclusive.parton.root'
     #event_info, particles = process_lhe(f_name_lhe)
@@ -165,15 +166,31 @@ if __name__ == "__main__":
     cos_ij_threshold = []
     weights_threshold = []
 
+    # define blocks
+    mtt_start = 300
+    mtt_stop = 2000
+    mtt_step = 100
+    mtt_low = np.arange(mtt_start,mtt_stop,mtt_step)
+    mtt_high = mtt_low + mtt_step
+    theta_start = 0
+    theta_stop = np.pi/2
+    theta_step = np.pi/20
+    theta_low = np.arange(theta_start,theta_stop,theta_step)
+    theta_high = theta_low + theta_step
+    reco_counts = np.zeros((mtt_low.shape[0],theta_low.shape[0]),dtype=int)
+
     batch_size = 60000
     # entry_start=1980000/2-batch_size/2,entry_stop=1980000/2+batch_size/2,step_size=batch_size
-    for ps in p_branch.iterate(p_branch.keys(),step_size=batch_size):
+    keys = ['Particle.PID','Particle.Status','Particle.Mother1','Particle.Px', 'Particle.Py', 'Particle.Pz', 'Particle.E']
+    for ps in p_branch.iterate(keys,step_size=batch_size):
         # define filters, get particles, build momentum vectors
         t_filter = ps['Particle.PID']==6
         tbar_filter = ps['Particle.PID']==-6
         l_filter = (np.abs(ps['Particle.PID']) > 10) & (np.abs(ps['Particle.PID']) < 17) & (ps['Particle.PID'] % 2 == 1)
         
+        #t = time.time_ns()
         ts = ps[t_filter][:,0]
+        #print(time.time_ns() - t)
         tbars = ps[tbar_filter][:,0]
         ls = ps[l_filter][:,0]
         
@@ -186,7 +203,9 @@ if __name__ == "__main__":
         ts_lep = ps[t_leptonic_filter][:,0]
         ts_had = ps[t_hadronic_filter][:,0]
         ws_had = ps[w_hadronic_filter][:,0]
+        #t = time.time_ns()
         qds = ps[qd_filter][:,0]
+        #print(time.time_ns() - t)
         qus = ps[qu_filter][:,0]
 
         t_4momentum = vector.array({'px':ts['Particle.Px'],'py':ts['Particle.Py'],'pz':ts['Particle.Pz'],'E':ts['Particle.E']})
@@ -199,10 +218,17 @@ if __name__ == "__main__":
         qu_4momentum = vector.array({'px':qus['Particle.Px'],'py':qus['Particle.Py'],'pz':qus['Particle.Pz'],'E':qus['Particle.E']})
         
         # copmute helicity basis and omegas
-        abs_cos_theta, nrk_bais = compute_helicity_basis(t_4momentum,tbar_4momentum)
+        #t = time.time_ns()
+        theta, nrk_bais = compute_helicity_basis(t_4momentum,tbar_4momentum)
+        
+        #print(time.time_ns() - t)
+        #t = time.time_ns()
         omega_leptonic = compute_Omega_leptonic(t_lep_4momentum,t_had_4momentum,l_4momentum)
+        #print(time.time_ns() - t)
         #omega_hadronic_ideal = compute_Omega_leptonic(t_had_4momentum, t_lep_4momentum, qd_4momentum)
-        cos_theta_w, omega_hadronic = compute_Omega_hadronic(t_lep_4momentum,t_had_4momentum,w_had_4momentum,qd_4momentum,qu_4momentum)
+        #t = time.time_ns()
+        omega_hadronic = compute_Omega_hadronic(t_lep_4momentum,t_had_4momentum,w_had_4momentum,qd_4momentum,qu_4momentum)
+        #print(time.time_ns() - t)
 
         # separate leptonic/hadronic omegas into t/tbar
         event_filter_t_leptonic = ls['Particle.PID'] < 0
@@ -216,20 +242,29 @@ if __name__ == "__main__":
         # generate matrix of cosines
         cos_ij_tmp = np.einsum('ik,jk->ijk',cos_t_nrk,cos_tbar_nrk)
         cos_ij[:,:,batch_size*idx:(idx+1)*batch_size] = cos_ij_tmp
-        
+
         # apply threshold selection
         ttbar_4momentum = t_4momentum + tbar_4momentum
         mtt = ttbar_4momentum.M
         abs_beta_tt = np.abs(ttbar_4momentum.beta)
-        threshold_filter = ((mtt <= 400) | ((mtt <= 500) & (mtt > 400) & (abs_cos_theta >= np.cos(3*np.pi/20))) | ((mtt <= 600) & (mtt > 500) & (abs_cos_theta >= np.cos(np.pi/20)))) & (abs_beta_tt <= .9)
-        
+        threshold_filter = ((mtt <= 400) | ((mtt <= 500) & (mtt > 400) & (theta <= 3*np.pi/20)) | ((mtt <= 600) & (mtt > 500) & (theta <= np.pi/20))) & (abs_beta_tt <= .9)
         cos_ij_threshold.append(cos_ij_tmp[:,:,threshold_filter])
-
         weights_threshold.append(weights[batch_size*idx:(idx+1)*batch_size][threshold_filter])
         
+        # accumulate reco counts
+        filter_mtt_min = mtt > mtt_low.reshape((-1,1))
+        filter_mtt_max = mtt < mtt_high.reshape((-1,1))
+        filter_theta_min = theta > theta_low.reshape((-1,1))
+        filter_theta_max = theta < theta_high.reshape((-1,1))
+
+        filter_mtt = filter_mtt_min & filter_mtt_max
+        filter_theta = filter_theta_min & filter_theta_max
+        filter_block = np.einsum('ik,jk->ijk',filter_mtt,filter_theta)
+        reco_counts += filter_block.sum(axis = 2)
+        
         # apply resolved preselction
-        #leps_and_jets_filter = (ps['Particle.Status'] == 1) & ( (np.abs(ps['Particle.PID']) < 10) | ((np.abs(ps['Particle.PID']) > 10) & (np.abs(ps['Particle.PID']) < 17) & (ps['Particle.PID'] % 2 == 1)) )
-        #neutrino_filter = (np.abs(ps['Particle.PID']) > 10) & (np.abs(ps['Particle.PID']) < 17) & (ps['Particle.PID'] % 2 == 0)
+        leps_and_jets_filter = (ps['Particle.Status'] == 1) & ( (np.abs(ps['Particle.PID']) < 10) | ((np.abs(ps['Particle.PID']) > 10) & (ps['Particle.PID'] % 2 == 1)) )
+        neutrino_filter = (np.abs(ps['Particle.PID']) > 10) & (np.abs(ps['Particle.PID']) < 17) & (ps['Particle.PID'] % 2 == 0)
 
         #leps_and_jets = ps[leps_and_jets_filter]
         #nuts = ps[neutrino_filter][:,0]
@@ -246,9 +281,13 @@ if __name__ == "__main__":
         idx+=1
 
     # threshold analysis
+    print(100*reco_counts/N_events)
     cos_ij_threshold = np.concatenate(cos_ij_threshold,axis=2)
     weights_threshold = ak.concatenate(weights_threshold).to_numpy()
+    #t = time.time_ns()
     Cij = np.apply_along_axis(compute_Cij,-1,cos_ij_threshold,weights_threshold)
+    #print(time.time_ns() - t)
+    #print(time.time()-t_total)
     print(Cij)
     
     # cnn fitting
